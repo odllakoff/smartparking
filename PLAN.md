@@ -8,7 +8,7 @@ La aclaración del docente prevalece sobre la regla de pertenencia del PDF: el c
 
 ## Modelo y reglas
 
-- Base operacional: solamente Cliente, Vehiculo y Reserva.
+- Entidades de negocio: Cliente, Vehiculo y Reserva. ADR-02 incorpora una cuarta tabla física técnica, integration.outbox, para entrega durable.
 - Cliente: id, nombre, email, telefono e identityUserId único.
 - Vehiculo: id, matricula única, marca, modelo y clienteId del propietario obligatorio.
 - Reserva: id, clienteId del reservante, vehiculoId, inicio, fin y estado ACTIVA o CANCELADA.
@@ -34,13 +34,13 @@ Para la interfaz se usará HTML, CSS y JavaScript sin framework; se servirá des
 
 Se propone PostgreSQL para negocio por su soporte de concurrencia entre procesos y restricciones de exclusión para impedir solapamientos. La restricción combina vehiculoId e intervalo temporal y aplica solamente a reservas ACTIVA. Se verificará disponibilidad de la extensión necesaria. Una segunda base independiente almacenará identidad, con conexión y credenciales separadas.
 
-Esto reemplaza la propuesta inicial de SQLite: PM2 y la carga objetivo justifican validar primero PostgreSQL. No se necesita un ORM si SQL parametrizado y repositorios pequeños resultan más fáciles de comprender. No se agregarán tablas de negocio auxiliares sin revisar la restricción del enunciado.
+Esto reemplaza la propuesta inicial de SQLite: PM2 y la carga objetivo justifican PostgreSQL. Se usa SQL parametrizado y repositorios pequeños. La incorporación posterior de integration.outbox se documenta explícitamente en ADR-02: estado técnico en la misma base para compartir el commit, conservando las tres entidades de negocio.
 
-### Auditoría: decisión pendiente del ADR y prototipo
+### Auditoría: decisión vigente ADR-02
 
-Comparar dos alternativas reales: invocación síncrona al componente de log y publicación mediante una cola persistente con consumidor independiente. Para la alternativa con cola, evaluar RabbitMQ, confirmaciones de publicación, mensajes persistentes, acknowledgements del consumidor, reintentos y deduplicación por eventId. El almacenamiento del log estará fuera de las bases de negocio e identidad.
+Se compararon HTTP posterior al commit, publicación directa en RabbitMQ y outbox transaccional. Se implementó outbox con polling y transporte HTTP al log independiente. El CRUD persiste cambio y evento pendiente en una sola transacción; un proceso PM2 separado entrega con deduplicación por eventId.
 
-Una cola por sí sola no hace atómica la escritura del negocio y la publicación. El prototipo debe demostrar qué ocurre si el proceso falla después del commit o el componente de eventos no está disponible. No declarar entrega garantizada sin resolver esa ventana. Un outbox relacional agregaría otra tabla, por lo que no se incorporará silenciosamente: se deberá justificar compatibilidad con la consigna o documentar el límite y consultar si fuera necesario.
+La cuarta tabla física técnica se declara como decisión del equipo en ADR-02. La garantía es al menos una vez mientras se conserven los volúmenes y se recuperen las dependencias. Se prueban caídas después del commit y después de confirmar recepción, rollback conjunto, receptor caído, reinicio y consumidores concurrentes.
 
 PM2 no ejecutará un consumidor de archivo por cada worker: el componente de log tendrá un único escritor o un almacenamiento que soporte concurrencia.
 
@@ -95,7 +95,7 @@ PM2 no ejecutará un consumidor de archivo por cada worker: el componente de log
 - README con instalación, variables, arranque, usuarios de demostración, pruebas y límites conocidos.
 - A1: UML de componentes con interfaces provistas/requeridas, dependencias, tecnologías y persistencias separadas.
 - A2: escenario de performance y escenario de cambio de mecanismo de auditoría; estímulo, ambiente, respuesta, medida, táctica SAP y ubicación concreta.
-- A3: ADR-01 sobre comunicación de eventos, alternativas, decisión, atributos afectados y consecuencias, incluida consistencia ante fallos.
+- A3: ADR-01 como antecedente y ADR-02 como decisión vigente de entrega durable, con alternativas, atributos afectados y consecuencias.
 - A4: matriz breve RF/componente/prueba y revisión de coherencia entre código, UML, escenarios y ADR.
 - Generar el PDF final desde fuentes editables cuando las decisiones estén verificadas.
 
@@ -108,10 +108,19 @@ No se anticiparán funcionalidades desconocidas de la próxima parte. Se facilit
 ## Estado al finalizar esta iteración
 
 - Consigna y ejemplo de clase revisados.
-- Node.js, npm, PM2, k6 y Docker encontrados en el equipo; falta verificar versiones y disponibilidad efectiva de servicios.
+- Node.js, npm, PM2, k6 y Docker verificados; bases, API, receptor y publicador ejecutados en la demo.
 - Implementados estructura, RF1–RF5, identidad, auditoría HTTP, interfaz mínima, seed y configuración PM2/k6.
-- Cuatro pruebas unitarias y nueve pruebas/subpruebas de integración pasaron nuevamente con la optimización JWT, incluyendo carrera en dos workers.
+- Cinco pruebas unitarias, nueve pruebas/subpruebas de integración general y siete de durabilidad aprobadas, incluyendo carrera en dos workers y muerte real de procesos auxiliares.
 - Primera carga con un worker: no cumple p95 ni tasa sostenida; evidencia conservada en results/ y docs/RESULTADOS.md.
 - Optimización de clave JWT validada; comparación de uno y dos workers documentada. Se corrigió el script PM2/PowerShell y se preasignaron 300 VUs en k6 sin reducir tasa ni flexibilizar umbrales.
-- Ensayo final con dos workers: 500 consultas/s durante 60 s, p95 de 242,75 ms, cero errores y cero iteraciones descartadas. Evidencia conservada en results/ y docs/RESULTADOS.md.
-- Pendientes de la entrega general: revisar la garantía de auditoría ante caída abrupta y preparar/revisar el PDF final. La garantía de auditoría sigue explícitamente limitada.
+- Ensayo con outbox activo y dos workers: 500 consultas/s durante 60 s, p95 de 25,67 ms, cero errores y cero iteraciones descartadas. Evidencia publicable en results/public/ y docs/RESULTADOS.md.
+- Implementada entrega durable según ADR-02; documentadas la cuarta tabla física, la entrega eventual y sus condiciones. Pendiente de la entrega general: preparar/revisar el PDF final.
+
+## Pendientes para cerrar la entrega
+
+1. Renderizar el UML y armar/revisar visualmente el PDF con A1–A4, incluyendo ADR-02 y la justificación de la tabla técnica.
+2. Verificar instalación y arranque desde un clon limpio siguiendo solamente el README.
+3. Recorrer manualmente todos los formularios de administrador y cliente; la verificación de navegador realizada hasta ahora cubre login, catálogo y listados.
+4. Publicar los nuevos commits en GitHub cuando corresponda y, al cerrar los puntos anteriores, considerar una etiqueta de referencia para la próxima parte.
+
+No se requiere agregar funcionalidades para esos puntos. La retención automática de eventos entregados y una prueba de capacidad de escrituras/backlog son mejoras posteriores, distintas del requisito de carga de consultas ya verificado.

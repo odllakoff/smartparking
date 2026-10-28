@@ -1,6 +1,8 @@
 # ADR-01: comunicación con el registro de eventos
 
-Estado: decisión implementada para la demo, con límite de entrega ante caídas explícito. Fecha: 28/10/2026.
+Estado: reemplazada por [ADR-02](ADR-02.md). Fecha original: 28/10/2026.
+
+Este documento conserva la decisión inicial y sus límites como antecedente. El diseño vigente utiliza outbox transaccional para coordinar negocio y eventos; el transporte HTTP se ejecuta desde un publicador independiente. Las menciones posteriores a la ventana no resuelta y a businessApplied describen la versión anterior.
 
 ## Contexto
 

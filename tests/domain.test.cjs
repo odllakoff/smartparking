@@ -6,6 +6,7 @@ const { hashPassword, verifyPassword, IdentityService } = require('../dist/ident
 const { validateInterval } = require('../dist/business/service');
 const { HttpEventPublisher } = require('../dist/audit/publisher');
 const { createServer } = require('node:http');
+const { retryDelay } = require('../dist/audit/outbox');
 const secret = 'unit-test-only-secret-with-at-least-32-characters';
 
 test('scrypt: salts distintos, contraseña correcta e incorrecta', async () => {
@@ -30,7 +31,7 @@ test('intervalos: rechaza iguales, invertidos e inválidos', () => {
   for (const [a,b] of [['2030-01-01','2030-01-01'],['2030-01-02','2030-01-01'],['x','y']]) assert.throws(() => validateInterval(a,b),{ status: 400 });
   validateInterval('2030-01-01T09:00:00Z','2030-01-01T10:00:00Z');
 });
-test('auditoría: reintenta con el mismo eventId y explicita commit ante fallo', async () => {
+test('transporte HTTP: un intento fallido se propaga al publicador durable', async () => {
   const received = [];
   const server = createServer(async (req,res) => {
     let body = ''; for await (const chunk of req) body += chunk;
@@ -40,7 +41,14 @@ test('auditoría: reintenta con el mismo eventId y explicita commit ante fallo',
   try {
     const event = { eventId: randomUUID(), entidadId: randomUUID(), tipo: 'ALTA' };
     const publisher = new HttpEventPublisher(`http://127.0.0.1:${server.address().port}`,'test');
-    await assert.rejects(publisher.publish(event),error => error.status === 503 && error.details.businessApplied === true);
-    assert.equal(received.length,3); assert.equal(new Set(received.map(e => e.eventId)).size,1);
+    await assert.rejects(publisher.publish(event),/HTTP 503/);
+    assert.equal(received.length,1); assert.equal(received[0].eventId,event.eventId);
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+test('backoff de outbox: espera exponencial con máximo de un minuto', () => {
+  assert.equal(retryDelay(0),1000);
+  assert.equal(retryDelay(1),2000);
+  assert.equal(retryDelay(5),32000);
+  assert.equal(retryDelay(6),60000);
+  assert.equal(retryDelay(1000),60000);
 });

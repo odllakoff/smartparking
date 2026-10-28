@@ -10,7 +10,7 @@ node "PM2 cluster - N workers" {
   component "Negocio\nClientes / Vehículos / Reservas\npertenencia y reglas" as Biz
   component "PgBusinessRepository" as BR
   component "PgIdentityRepository" as IR
-  component "HttpEventPublisher" as EP
+  component "PgOutboxPublisher\nconexión de la transacción" as OP
   interface "REST / DTOs" as REST
   interface "IdentityService\nlogin / validate" as AUTH
   interface "BusinessService\nCRUD / consultas" as USE
@@ -28,11 +28,18 @@ node "PM2 cluster - N workers" {
   IR - II
   Auth ..> II : requiere
   Biz ..> II : existe identidad
-  EP - IE
-  Biz ..> IE : post-commit
+  OP - IE
+  Biz ..> IE : dentro de transaction()
 }
-database "PostgreSQL negocio\nClientes / Vehículos / Reservas\nEXCLUDE GiST / transacciones" as DB
+database "PostgreSQL negocio\npublic: Clientes / Vehículos / Reservas\nintegration.outbox: tabla técnica" as DB
 database "PostgreSQL identidad\nUsuarios / hashes / roles\nservidor y volumen separados" as IDB
+node "Publicador independiente\nPM2 fork - 1 instancia" {
+  component "OutboxDispatcher\npolling / reintentos / backoff" as DP
+  component "HttpEventPublisher" as EP
+  interface "EventPublisher\ntransporte" as TRANSPORT
+  EP - TRANSPORT
+  DP ..> TRANSPORT : requiere
+}
 node "Proceso independiente\nPM2 fork - 1 instancia" {
   component "Registro de eventos\nvalida / deduplica / conserva" as Log
   interface "POST /events\nEventoAuditoriaDTO" as EVENTS
@@ -41,12 +48,15 @@ node "Proceso independiente\nPM2 fork - 1 instancia" {
 database "SQLite auditoría\neventId único / WAL" as LDB
 EP ..> EVENTS : HTTP + secreto / 204
 BR --> DB : SQL / pool
+OP --> DB : INSERT evento / mismo commit
 IR --> IDB : SQL / pool
+DP --> DB : SKIP LOCKED / delivered_at
 Log --> LDB : persistir antes de confirmar
-note bottom of EP
-  Timeout y 3 intentos, mismo eventId.
-  No hay atomicidad commit/publicación.
-  503 businessApplied ante fallo final.
+note bottom of DP
+  Negocio + evento: commit atómico.
+  HTTP: timeout 1,5 s por intento.
+  Reintentos durables con mismo eventId.
+  Al menos una vez; receptor idempotente.
 end note
 legend bottom
   Línea a interfaz: provista. Flecha discontinua: requerida.

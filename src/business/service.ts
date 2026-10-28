@@ -16,7 +16,7 @@ function found<T>(value: T | undefined): T {
   return value;
 }
 export class BusinessService {
-  constructor(private repo: BusinessRepository, private users: IdentityRepository, private events: EventPublisher) {}
+  constructor(private repo: BusinessRepository, private users: IdentityRepository) {}
   private async mine(actor: Actor, repo = this.repo) {
     const cliente = await repo.clienteByUser(actor.userId);
     if (!cliente) throw new AppError(403, 'El usuario no está vinculado a un cliente');
@@ -25,8 +25,17 @@ export class BusinessService {
   private async owner(actor: Actor, clienteId: string, repo = this.repo) {
     if (actor.role !== 'ADMIN' && (await this.mine(actor, repo)).id !== clienteId) throw new AppError(403, 'El recurso pertenece a otro cliente');
   }
-  private async audit(actor: Actor, tipo: string, entidad: string, entidadId: string) {
-    await this.events.publish({ eventId: randomUUID(), tipo, entidad, entidadId, userId: actor.userId, fechaHora: new Date().toISOString() });
+  private async audit(events: EventPublisher, actor: Actor, tipo: string, entidad: string, entidadId: string) {
+    await events.publish({ eventId: randomUUID(), tipo, entidad, entidadId, userId: actor.userId, fechaHora: new Date().toISOString() });
+  }
+  private change<T extends { id: string }>(actor: Actor, tipo: string, entidad: string,
+    work: (repo: BusinessRepository) => Promise<T>): Promise<T> {
+    return this.repo.transaction(async (repo,events) => {
+      const result = await work(repo);
+      // Si falla la persistencia del evento, también se revierte el cambio de negocio.
+      await this.audit(events,actor,tipo,entidad,result.id);
+      return result;
+    });
   }
   me(actor: Actor) { return this.mine(actor); }
   clientes(actor: Actor, page: Page) { requireAdmin(actor); return this.repo.clientes(page); }
@@ -34,18 +43,17 @@ export class BusinessService {
   async createCliente(actor: Actor, input: Omit<Cliente, 'id'>) {
     requireAdmin(actor);
     if (!await this.users.exists(input.identityUserId)) throw new AppError(400, 'La identidad indicada no existe');
-    const c = await this.repo.transaction(repo => repo.saveCliente({ ...input, id: randomUUID() }, true));
-    await this.audit(actor, 'ALTA', 'Cliente', c.id); return c;
+    return this.change(actor,'ALTA','Cliente',repo => repo.saveCliente({ ...input, id: randomUUID() }, true));
   }
   async updateCliente(actor: Actor, id: string, input: Pick<Cliente, 'nombre' | 'email' | 'telefono'>) {
     requireAdmin(actor);
-    const c = await this.repo.transaction(async repo => repo.saveCliente({ ...found(await repo.cliente(id)), ...input }, false));
-    await this.audit(actor, 'MODIFICACION', 'Cliente', c.id); return c;
+    return this.change(actor,'MODIFICACION','Cliente',async repo => repo.saveCliente({ ...found(await repo.cliente(id)), ...input }, false));
   }
   async deleteCliente(actor: Actor, id: string) {
     requireAdmin(actor);
-    await this.repo.transaction(async repo => { found(await repo.cliente(id)); await repo.deleteCliente(id); });
-    await this.audit(actor, 'BAJA', 'Cliente', id);
+    await this.change(actor,'BAJA','Cliente',async repo => {
+      found(await repo.cliente(id)); await repo.deleteCliente(id); return { id };
+    });
   }
   async vehiculos(actor: Actor, page: Page, catalogo: boolean) {
     if (actor.role === 'ADMIN') return this.repo.vehiculos(page);
@@ -59,24 +67,21 @@ export class BusinessService {
     const clienteId = actor.role === 'ADMIN' ? input.clienteId : (await this.mine(actor)).id;
     if (!clienteId) throw new AppError(400, 'ADMIN debe indicar clienteId');
     if (actor.role !== 'ADMIN' && input.clienteId && input.clienteId !== clienteId) throw new AppError(403, 'No puede asignar un vehículo a otro cliente');
-    const v = await this.repo.transaction(async repo => {
+    return this.change(actor,'ALTA','Vehiculo',async repo => {
       found(await repo.cliente(clienteId));
       return repo.saveVehiculo({ ...input, clienteId, id: randomUUID() }, true);
     });
-    await this.audit(actor, 'ALTA', 'Vehiculo', v.id); return v;
   }
   async updateVehiculo(actor: Actor, id: string, input: Pick<Vehiculo, 'matricula' | 'marca' | 'modelo'>) {
-    const v = await this.repo.transaction(async repo => {
+    return this.change(actor,'MODIFICACION','Vehiculo',async repo => {
       const current = found(await repo.vehiculo(id, true)); await this.owner(actor, current.clienteId, repo);
       return repo.saveVehiculo({ ...current, ...input }, false);
     });
-    await this.audit(actor, 'MODIFICACION', 'Vehiculo', id); return v;
   }
   async deleteVehiculo(actor: Actor, id: string) {
-    await this.repo.transaction(async repo => {
-      const v = found(await repo.vehiculo(id, true)); await this.owner(actor, v.clienteId, repo); await repo.deleteVehiculo(id);
+    await this.change(actor,'BAJA','Vehiculo',async repo => {
+      const v = found(await repo.vehiculo(id, true)); await this.owner(actor, v.clienteId, repo); await repo.deleteVehiculo(id); return { id };
     });
-    await this.audit(actor, 'BAJA', 'Vehiculo', id);
   }
   async reservas(actor: Actor, filter: ReservaFilter, global = false) {
     if (global) { requireAdmin(actor); return this.repo.reservas(filter); }
@@ -90,31 +95,29 @@ export class BusinessService {
     const clienteId = actor.role === 'ADMIN' ? input.clienteId : (await this.mine(actor)).id;
     if (!clienteId) throw new AppError(400, 'ADMIN debe indicar clienteId');
     if (actor.role !== 'ADMIN' && input.clienteId && input.clienteId !== clienteId) throw new AppError(403, 'No puede reservar por otro cliente');
-    const r = await this.repo.transaction(async repo => {
+    return this.change(actor,'ALTA','Reserva',async repo => {
       found(await repo.cliente(clienteId));
       // El bloqueo también coordina borrado de vehículo y creación de reserva.
       const v = found(await repo.vehiculo(input.vehiculoId, true));
       if (v.clienteId === clienteId) throw new AppError(400, 'No se puede reservar un vehículo propio');
       return repo.saveReserva({ ...input, inicio: new Date(input.inicio).toISOString(), fin: new Date(input.fin).toISOString(), clienteId, id: randomUUID(), estado: 'ACTIVA' }, true);
     });
-    await this.audit(actor, 'ALTA', 'Reserva', r.id); return r;
   }
   async updateReserva(actor: Actor, id: string, input: { inicio: string; fin: string }) {
     validateInterval(input.inicio, input.fin);
-    const r = await this.repo.transaction(async repo => {
+    return this.change(actor,'MODIFICACION','Reserva',async repo => {
       const current = found(await repo.reserva(id, true)); await this.owner(actor, current.clienteId, repo);
       if (current.estado !== 'ACTIVA') throw new AppError(409, 'Una reserva cancelada no se modifica');
       return repo.saveReserva({ ...current, inicio: new Date(input.inicio).toISOString(), fin: new Date(input.fin).toISOString() }, false);
     });
-    await this.audit(actor, 'MODIFICACION', 'Reserva', id); return r;
   }
   async cancelReserva(actor: Actor, id: string) {
-    const result = await this.repo.transaction(async repo => {
+    return this.repo.transaction(async (repo,events) => {
       const current = found(await repo.reserva(id, true)); await this.owner(actor, current.clienteId, repo);
-      if (current.estado === 'CANCELADA') return { reserva: current, changed: false };
-      return { reserva: await repo.saveReserva({ ...current, estado: 'CANCELADA' }, false), changed: true };
+      if (current.estado === 'CANCELADA') return current;
+      const result = await repo.saveReserva({ ...current, estado: 'CANCELADA' }, false);
+      await this.audit(events,actor,'CANCELACION','Reserva',id);
+      return result;
     });
-    if (result.changed) await this.audit(actor, 'CANCELACION', 'Reserva', id);
-    return result.reserva;
   }
 }

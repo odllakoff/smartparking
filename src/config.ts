@@ -10,7 +10,8 @@ const schema = z.object({
   AUDIT_SECRET: z.string().min(32),
   AUDIT_URL: z.url().default('http://127.0.0.1:3001'),
   AUDIT_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
-  AUDIT_FILE: z.string().default('data/audit.sqlite')
+  AUDIT_FILE: z.string().default('data/audit.sqlite'),
+  OUTBOX_POLL_MS: z.coerce.number().int().min(50).max(60000).default(500)
 });
 export const config = schema.parse(process.env);
 if (new URL(config.BUSINESS_DATABASE_URL).pathname === new URL(config.IDENTITY_DATABASE_URL).pathname &&

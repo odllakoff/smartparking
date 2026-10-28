@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-10-28T20:08:51.7851587-03:00",
+  "workers": 2,
+  "duration": "60s",
+  "rate": 500,
+  "node": "v24.15.0",
+  "k6": "k6.exe v2.2.0 (commit/00a9a1b7f5, go1.26.5, windows/amd64)",
+  "cpu": {
+    "Name": "AMD Ryzen 5 Microsoft Surface (R) Edition",
+    "NumberOfCores": 6,
+    "NumberOfLogicalProcessors": 12
+  },
+  "ramBytes": 16591990784,
+  "steadyPreAllocatedVUs": 300,
+  "steadyMaxVUs": 300,
+  "loadScriptSha256": "5F71938FF1B8D78A27424D03DE46E83B1DAC20DC046D64397437D230D4F96A04"
+}

@@ -10,11 +10,13 @@
     "start": "node dist/main.js",
     "dev": "tsx watch src/main.ts",
     "audit": "node dist/audit/main.js",
+    "outbox": "node dist/audit/worker.js",
     "db:setup": "tsx src/scripts/setup.ts",
     "seed": "tsx src/scripts/seed.ts",
     "results:export": "node scripts/export-results.cjs",
     "test": "npm run build && node --test tests/*.test.cjs",
     "test:integration": "npm run build && node --test tests/integration.cjs",
+    "test:outbox": "npm run build && node --test tests/outbox.integration.cjs",
     "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
     "pm2:stop": "pm2 delete ecosystem.config.cjs"
   },

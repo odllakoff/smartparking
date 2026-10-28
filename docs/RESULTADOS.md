@@ -1,6 +1,22 @@
 # Verificación - 28/10/2026
 
-## Funcionalidad
+## Resultado vigente: outbox transaccional
+
+Se implementó ADR-02 y se agregó integration.outbox como tabla técnica. La migración se aplicó sobre la demo sin borrar datos. PM2 ejecuta dos workers de API, un publicador outbox y un receptor de auditoría, con almacenamiento de identidad y negocio separado.
+
+- Cinco pruebas unitarias aprobadas: scrypt, JWT, intervalos, propagación de fallo HTTP al publicador y backoff acotado.
+- Nueve pruebas/subpruebas de integración general aprobadas, incluyendo carrera de 12 reservas en dos workers: una aceptada y once conflictos. Workers observados: PID 27744 y 31932.
+- Siete pruebas/subpruebas de durabilidad aprobadas sobre una base efímera aislada: rollback al fallar el evento; rollback después de ambas escrituras; muerte real del proceso después del commit; alta HTTP con receptor caído, reintento persistido y reinicio; muerte del publicador después de persistir en el receptor y deduplicación; dos consumidores concurrentes tomando filas diferentes.
+- Una repetición devolvió un fallo genérico del proceso de pruebas antes de informar casos. No se identificó la causa; la ejecución TAP detallada y una repetición posterior del comando habitual aprobaron todos los casos. No se atribuye ese fallo aislado a un defecto específico sin evidencia.
+- k6 con outbox activo: **500 consultas/s durante 60 s, p95 de 25,67 ms, cero errores y cero iteraciones descartadas**; 30.001 consultas en steady por el límite de temporización. Todos los thresholds aprobados.
+- Comprobación final sobre la demo: 12 eventos persistidos, los 12 entregados y cero pendientes. No quedaron bases efímeras de pruebas.
+- Evidencia publicable: results/public/20261028-200851-2-workers.json y metadatos del mismo prefijo. Dos workers, 300 VUs preasignados, mismo dataset, mezcla y umbrales documentados abajo. Publicador con pool propio de dos conexiones y polling de 500 ms.
+
+Los resultados previos se conservan en las secciones siguientes. La mejora de p95 respecto de otra ejecución en el mismo equipo no demuestra que outbox acelere las consultas: el tráfico es de lectura y el entorno local compartido varía. Esta prueba verifica que el escenario de consultas sigue cumpliendo con el componente durable activo; no mide la capacidad máxima de escrituras o de vaciado de backlog.
+
+La garantía vigente y sus condiciones se documentan en ADR-02.md. La API confirma negocio y evento pendiente; la prueba de integración espera la entrega eventual antes de revisar el log. Ya no se devuelve businessApplied por indisponibilidad del receptor.
+
+## Funcionalidad previa al outbox (histórico)
 
 La repetición fue autorizada y se completó. El código con reutilización de KeyObject para JWT volvió a aprobar las pruebas:
 
@@ -53,7 +69,7 @@ Con dos workers y 100 VUs iniciales, el p95 cumplió pero hubo 114 descartes. Se
 
 La comparación de un worker antes/después de KeyObject registró menor p95 y menos descartes; el entorno local compartido introduce variabilidad y no se presenta como microbenchmark aislado de JWT.
 
-## Resultado vigente y alcance
+## Resultado previo al outbox y alcance
 
 El ensayo final aprobó todos los umbrales: **500 consultas/s durante 60 s, p95 de 242,75 ms, cero errores y cero iteraciones descartadas**. Completó 30.001 consultas durante el tramo estable (variación de una iteración en el límite de temporización). Los aproximadamente 420 requests/s del promedio global mostrado por k6 incluyen setup, calentamiento y pausa; no son la tasa del escenario steady.
 
@@ -63,4 +79,4 @@ También se corrigió run-load.ps1 para no tratar como fallo un escalado PM2 a l
 
 El pool máximo es de 10 conexiones por base y por worker. La carga final tuvo dos workers, un proceso de auditoría y los dos PostgreSQL separados, sobre el mismo dataset. El resultado acredita el escenario local descrito durante un minuto estable, sin garantizar otros volúmenes, hardware o mezclas.
 
-No se midió una carga de escrituras ni tolerancia a caídas de auditoría; sus límites siguen documentados en ADR-01.md. El mensaje AUDIT_DELIVERY_FAILED de la prueba unitaria es esperado: el receptor simulado devuelve 503 y se comprueban los tres reintentos y businessApplied.
+En aquella versión no se había medido tolerancia a caídas de auditoría; sus límites históricos figuran en ADR-01.md. El mensaje AUDIT_DELIVERY_FAILED correspondía al test de transporte de esa versión. La entrega durable y sus nuevas pruebas se documentan al comienzo de este informe y en ADR-02.md; la carga de escrituras sigue sin medirse.

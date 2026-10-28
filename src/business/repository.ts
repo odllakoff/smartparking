@@ -1,9 +1,11 @@
 import { Pool, PoolClient } from 'pg';
 import { Cliente, Vehiculo, Reserva, Page, ReservaFilter } from '../domain';
 import { databaseError } from '../shared/errors';
+import { EventPublisher } from '../audit/publisher';
+import { PgOutboxPublisher } from '../audit/outbox';
 
 export interface BusinessRepository {
-  transaction<T>(work: (repo: BusinessRepository) => Promise<T>): Promise<T>;
+  transaction<T>(work: (repo: BusinessRepository, events: EventPublisher) => Promise<T>): Promise<T>;
   cliente(id: string): Promise<Cliente | undefined>;
   clienteByUser(userId: string): Promise<Cliente | undefined>;
   clientes(page: Page): Promise<Cliente[]>;
@@ -27,11 +29,12 @@ function toReserva(row: any): Reserva | undefined {
 export class PgBusinessRepository implements BusinessRepository {
   constructor(private pool: Pool, private connection?: PoolClient) {}
   private get db() { return this.connection ?? this.pool; }
-  async transaction<T>(work: (repo: BusinessRepository) => Promise<T>): Promise<T> {
+  async transaction<T>(work: (repo: BusinessRepository, events: EventPublisher) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      const result = await work(new PgBusinessRepository(this.pool, client));
+      // Ambos adaptadores usan LA MISMA conexión: el commit incluye cambio y evento pendiente.
+      const result = await work(new PgBusinessRepository(this.pool, client), new PgOutboxPublisher(client));
       await client.query('COMMIT');
       return result;
     } catch (error) { await client.query('ROLLBACK'); return databaseError(error); }

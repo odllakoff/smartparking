@@ -21,3 +21,17 @@ CREATE INDEX IF NOT EXISTS reservas_cliente_inicio ON reservas(cliente_id,inicio
 CREATE INDEX IF NOT EXISTS reservas_estado_inicio ON reservas(estado,inicio,id);
 CREATE INDEX IF NOT EXISTS reservas_inicio ON reservas(inicio,id);
 CREATE INDEX IF NOT EXISTS reservas_vehiculo ON reservas(vehiculo_id);
+
+-- Estado técnico de integración: comparte la transacción, pero no es una entidad del dominio.
+CREATE SCHEMA IF NOT EXISTS integration;
+CREATE TABLE IF NOT EXISTS integration.outbox (
+  event_id uuid PRIMARY KEY,
+  payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  delivered_at timestamptz,
+  last_error text
+);
+CREATE INDEX IF NOT EXISTS outbox_pending
+  ON integration.outbox(next_attempt_at,created_at,event_id) WHERE delivered_at IS NULL;

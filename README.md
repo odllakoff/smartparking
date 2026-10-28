@@ -4,9 +4,9 @@ Proyecto educativo de arquitectura de software. Implementación en TypeScript es
 
 ## Estado
 
-Implementados RF1–RF5, interfaz mínima, JWT, controles de pertenencia, concurrencia en PostgreSQL, PM2 y scripts k6. Pasaron nuevamente cuatro pruebas unitarias y nueve pruebas/subpruebas de integración con la optimización JWT; la integración observó los dos workers PM2.
+Implementados RF1–RF5, interfaz mínima, JWT, controles de pertenencia, concurrencia en PostgreSQL, PM2, scripts k6 y entrega durable de auditoría mediante outbox transaccional. Ver docs/RESULTADOS.md para la verificación y sus condiciones.
 
-La prueba de carga final **cumplió en el entorno local medido**: 500 consultas/s durante 60 s, p95 de 242,75 ms, cero errores y cero iteraciones descartadas, con dos workers PM2, reutilización de la clave JWT y 300 usuarios virtuales preasignados en k6. La referencia inicial fallida y los ensayos intermedios se conservaron; ver docs/RESULTADOS.md para condiciones y comparación.
+La prueba de carga con outbox activo **cumplió en el entorno local medido**: 500 consultas/s durante 60 s, p95 de 25,67 ms, cero errores y cero iteraciones descartadas, con dos workers PM2 y 300 usuarios virtuales preasignados en k6. Se aprobaron cinco pruebas unitarias, nueve pruebas/subpruebas de integración general y siete de durabilidad. La referencia inicial fallida y los ensayos intermedios se conservaron; ver docs/RESULTADOS.md para condiciones y comparación.
 
 La API quedó ejecutándose con dos workers y el código optimizado verificado. El cumplimiento observado corresponde al dataset y a la mezcla de consultas documentados; no garantiza el mismo resultado en cualquier hardware o carga.
 
@@ -36,21 +36,25 @@ Usuarios demo: `admin@demo.local` y `cliente1@demo.local` a `cliente20@demo.loca
 
 El frontend es deliberadamente básico: elegir un vehículo del catálogo, indicar fechas y guardar. Las fechas ingresadas son locales y se envían en UTC. El administrador puede crear una identidad de cliente y luego vincularla a un registro Cliente; ambos pasos están separados porque se persisten en componentes diferentes. Un fallo al crear el Cliente permite reutilizar el ID de la identidad ya creada.
 
-Para ejecutar sin PM2: `npm.cmd run audit` en una terminal y `npm.cmd start` en otra. `npm.cmd run dev` observa cambios de la API. No ejecutar simultáneamente dos servidores sobre el mismo puerto.
+Para ejecutar sin PM2: `npm.cmd run audit`, `npm.cmd run outbox` y `npm.cmd start`, cada uno en una terminal. `npm.cmd run dev` observa cambios de la API. No ejecutar simultáneamente dos servidores sobre el mismo puerto. Al actualizar desde la versión inicial, ejecutar `npm.cmd run db:setup` antes de compilar y recargar PM2: la migración agrega el outbox sin borrar datos.
 
 ## Pruebas
 
 ```powershell
 npm.cmd test
-# Requiere bases inicializadas y API + auditoría ejecutándose:
+# Requiere bases inicializadas, API, auditoría y publicador outbox ejecutándose:
 $env:EXPECT_WORKERS = '2'
 npm.cmd run test:integration
+# Usa una base efímera y procesos aislados; no detiene la demo:
+npm.cmd run test:outbox
 # Crea resultados JSON y metadatos; deja PM2 con la cantidad solicitada:
 .\scripts\run-load.ps1 -Instances 1 -Duration 60s
 .\scripts\run-load.ps1 -Instances 2 -Duration 60s
 ```
 
 La integración crea registros temporales mediante la API y elimina sus datos de negocio al terminar; conserva los eventos de auditoría. Usar únicamente las bases de demostración del proyecto. EXPECT_WORKERS comprueba que la carrera alcanzó varios procesos, además de comprobar el resultado de las reservas.
+
+La prueba de outbox crea una base con prefijo `sp_outbox_test_` en el servidor de negocio y la elimina al finalizar; requiere permiso de crear bases (disponible en el contenedor local). Prueba rollback conjunto, procesos muertos después del commit y después de confirmar recepción, receptor caído, reinicio del publicador y consumidores concurrentes. Las muertes se provocan en procesos auxiliares de prueba, sin hooks en producción.
 
 k6 separa 10 s de calentamiento, una pausa de 2 s y 60 s de carga estable. Cada iteración estable es una consulta autenticada: 75% propias y 25% globales, variando cliente, estado y offset. Los 21 logins ocurren en setup y no forman parte del p95 etiquetado `phase:steady`. Los filtros usan intersección temporal `[desde,hasta)`. Se exige p95 < 300 ms, cero respuestas fallidas, checks correctos y cero iteraciones descartadas. No alcanza con ofrecer 500/s si k6 descarta iteraciones. Se preasignan 300 usuarios virtuales para evitar crearlos durante la medición, manteniendo el máximo anterior. Hardware y JSON se guardan en `results/`; las nuevas ejecuciones también registran el hash del script y la asignación de VUs.
 
@@ -83,21 +87,34 @@ Errores: 400 validación, 401 identidad, 403 permisos, 404 registro inexistente,
 
 - `src/business`: casos de uso e interfaz/adaptador PostgreSQL.
 - `src/identity`: hash scrypt, repositorio de usuarios, login y JWT HS256.
-- `src/audit`: contrato EventPublisher, adaptador HTTP y receptor con SQLite independiente.
+- `src/audit`: contrato EventPublisher, outbox, publicador durable, adaptador HTTP y receptor con SQLite independiente.
 - `src/http`: validación, middleware y rutas; sin SQL.
 - `src/main.ts`: composición, conexiones y cierre de API.
-- `sql/`: esquemas idempotentes, sin tablas de negocio adicionales.
+- `sql/`: esquemas idempotentes; tres tablas de dominio y `integration.outbox` como cuarta tabla física técnica, según ADR-02.
 - `public/`: UI sin framework ni build propio.
 - `tests/`, `load/`, `scripts/`: pruebas funcionales y carga reproducible.
 - `docs/`: arquitectura, ADR y resultados; `PLAN.md`: alcance y etapas acordadas.
 
-La exclusión GiST combina vehículo e intervalo `[inicio,fin)` solo para reservas activas. PostgreSQL rechaza el solapamiento entre altas o modificaciones concurrentes. Los locks de fila coordinan cambios y cancelaciones; no se utilizan locks de memoria que fallen entre workers. Las transacciones son cortas y la auditoría se invoca después del commit para no mantener conexiones ocupadas mientras espera HTTP.
+La exclusión GiST combina vehículo e intervalo `[inicio,fin)` solo para reservas activas. PostgreSQL rechaza el solapamiento entre altas o modificaciones concurrentes. Los locks de fila coordinan cambios y cancelaciones; no se utilizan locks de memoria que fallen entre workers. Cada escritura y su evento pendiente comparten una transacción. El CRUD no espera HTTP; un proceso independiente realiza la entrega desde su propio pool.
 
-## Auditoría y límite conocido
+## Auditoría durable
 
-El receptor escucha solamente en loopback, verifica un secreto independiente y confirma después de persistir en `data/audit.sqlite`. Usa eventId único, WAL y escritura síncrona completa. Un solo proceso PM2 es dueño del log; cada worker publica por HTTP, con timeout y tres intentos usando el mismo ID.
+El receptor escucha solamente en loopback, verifica un secreto independiente y confirma después de persistir en `data/audit.sqlite`. Usa eventId único, WAL y escritura síncrona completa. Un solo proceso PM2 es dueño del log. Otro proceso, `smartparking-outbox`, consulta los pendientes y entrega por HTTP.
 
-**No hay atomicidad entre el commit de negocio y la entrega al log.** Ante caída abrupta en esa ventana puede faltar un evento. Agregar una cola no resuelve por sí solo esa ventana. Si el envío agota los intentos, se escribe `AUDIT_DELIVERY_FAILED` en stderr y la API responde 503 con `details.businessApplied: true`, entidadId y eventId; no reintentar automáticamente el alta, porque el negocio ya se guardó. No existe reconciliación automática en esta primera versión. Ver ADR-01 para alternativas.
+**El cambio y su evento pendiente se confirman juntos.** `BusinessRepository.transaction` proporciona el repositorio y un EventPublisher asociados a la misma conexión. Si falla guardar el evento, se revierte el cambio. Una respuesta exitosa confirma esa persistencia local; el evento puede llegar al log unos instantes después.
+
+El publicador toma una fila con `FOR UPDATE SKIP LOCKED`, realiza un intento HTTP con timeout de 1.500 ms y marca `delivered_at` después del acuse. Si falla, conserva el evento, aumenta `attempts` y programa `next_attempt_at` con backoff de 1 a 60 s, sin límite de reintentos. El polling predeterminado es de 500 ms, configurable con `OUTBOX_POLL_MS`. Un reinicio retoma los pendientes; una caída después de que el receptor guardó puede provocar reenvío, deduplicado por `eventId`.
+
+La garantía es entrega al menos una vez mientras se conserven los volúmenes y se recuperen el publicador/receptor. Las filas entregadas se conservan para inspección; no hay limpieza automática ni orden estricto de entrega. Un error permanente requiere intervención y puede acumular pendientes. Ver [ADR-02](docs/ADR-02.md) para la decisión y sus límites; ADR-01 conserva el antecedente.
+
+Para revisar el backlog y sus errores desde PostgreSQL:
+
+```sql
+SELECT event_id, created_at, attempts, next_attempt_at, last_error
+FROM integration.outbox
+WHERE delivered_at IS NULL
+ORDER BY created_at;
+```
 
 ## Detener
 

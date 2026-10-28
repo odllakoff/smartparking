@@ -11,6 +11,8 @@ npm.cmd run build
 if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación' }
 & node_modules\.bin\pm2.cmd startOrReload ecosystem.config.cjs --only smartparking-audit --update-env
 if ($LASTEXITCODE -ne 0) { throw 'Falló el inicio de auditoría' }
+& node_modules\.bin\pm2.cmd startOrReload ecosystem.config.cjs --only smartparking-outbox --update-env
+if ($LASTEXITCODE -ne 0) { throw 'Falló el publicador outbox' }
 & node_modules\.bin\pm2.cmd startOrReload ecosystem.config.cjs --only smartparking-api --update-env
 if ($LASTEXITCODE -ne 0) { throw 'Falló PM2' }
 $processes = (& node_modules\.bin\pm2.cmd jlist | Out-String | ConvertFrom-Json -AsHashtable)

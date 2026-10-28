@@ -28,7 +28,7 @@ app.post('/events', (req, res) => {
   insert.run(event.data.eventId, JSON.stringify(event.data));
   res.sendStatus(204);
 });
-// Un solo proceso escribe el log; los workers HTTP envían eventos mediante este contrato.
+// Un solo proceso escribe el log; el publicador outbox envía y reenvía eventos por este contrato.
 const server = app.listen(config.AUDIT_PORT, '127.0.0.1', () => console.log(`Auditoría en ${config.AUDIT_PORT}`));
 function stop() { server.close(() => { db.close(); process.exit(0); }); }
 process.on('SIGINT', stop); process.on('SIGTERM', stop);

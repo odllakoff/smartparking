@@ -75,6 +75,12 @@ test('integración real: CRUD, autorización, carreras entre workers y auditorí
       assert.equal((await request('/reservas',b,'POST',interval)).status,201);
     });
     await t.test('auditoría autenticada y deduplicación persistente', async () => {
+      // La respuesta del CRUD confirma negocio + outbox; la entrega del log es eventual.
+      const deadline = Date.now()+15000;
+      while ((await db.query(`SELECT 1 FROM integration.outbox WHERE delivered_at IS NULL AND payload->>'entidadId'=$1`,[reservation.id])).rowCount) {
+        assert.ok(Date.now()<deadline,'El publicador no entregó los eventos de la reserva');
+        await new Promise(resolve => setTimeout(resolve,50));
+      }
       const event = { eventId:randomUUID(),tipo:'PRUEBA',entidad:'Reserva',entidadId:reservation.id,userId:randomUUID(),fechaHora:new Date().toISOString() };
       const options = { method:'POST',headers:{ 'Content-Type':'application/json','X-Audit-Secret':process.env.AUDIT_SECRET },body:JSON.stringify(event) };
       assert.equal((await fetch(process.env.AUDIT_URL+'/events',{ ...options,headers:{'Content-Type':'application/json'} })).status,401);
