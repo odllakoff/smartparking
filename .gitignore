@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/
+logs/
+tmp/
+output/
+results/*.json
+*.log

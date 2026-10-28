@@ -1,0 +1,55 @@
+@startuml
+title SmartParking - Componentes e interfaces
+skinparam componentStyle uml2
+skinparam linetype ortho
+left to right direction
+component "UI mínima\nHTML / JS" as UI
+node "PM2 cluster - N workers" {
+  component "API HTTP\nExpress + Zod\nBearer / rol ADMIN" as API
+  component "Identidad\nlogin / emisión JWT\nvalidación firma y vigencia" as Auth
+  component "Negocio\nClientes / Vehículos / Reservas\npertenencia y reglas" as Biz
+  component "PgBusinessRepository" as BR
+  component "PgIdentityRepository" as IR
+  component "HttpEventPublisher" as EP
+  interface "REST / DTOs" as REST
+  interface "IdentityService\nlogin / validate" as AUTH
+  interface "BusinessService\nCRUD / consultas" as USE
+  interface "BusinessRepository" as IB
+  interface "IdentityRepository" as II
+  interface "EventPublisher" as IE
+  API - REST
+  UI ..> REST : requiere
+  Auth - AUTH
+  API ..> AUTH : requiere
+  Biz - USE
+  API ..> USE : requiere
+  BR - IB
+  Biz ..> IB : requiere
+  IR - II
+  Auth ..> II : requiere
+  Biz ..> II : existe identidad
+  EP - IE
+  Biz ..> IE : post-commit
+}
+database "PostgreSQL negocio\nClientes / Vehículos / Reservas\nEXCLUDE GiST / transacciones" as DB
+database "PostgreSQL identidad\nUsuarios / hashes / roles\nservidor y volumen separados" as IDB
+node "Proceso independiente\nPM2 fork - 1 instancia" {
+  component "Registro de eventos\nvalida / deduplica / conserva" as Log
+  interface "POST /events\nEventoAuditoriaDTO" as EVENTS
+  Log - EVENTS
+}
+database "SQLite auditoría\neventId único / WAL" as LDB
+EP ..> EVENTS : HTTP + secreto / 204
+BR --> DB : SQL / pool
+IR --> IDB : SQL / pool
+Log --> LDB : persistir antes de confirmar
+note bottom of EP
+  Timeout y 3 intentos, mismo eventId.
+  No hay atomicidad commit/publicación.
+  503 businessApplied ante fallo final.
+end note
+legend bottom
+  Línea a interfaz: provista. Flecha discontinua: requerida.
+  Bases independientes: identidad no comparte storage con negocio.
+endlegend
+@enduml
