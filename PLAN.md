@@ -114,13 +114,17 @@ No se anticiparán funcionalidades desconocidas de la próxima parte. Se facilit
 - Primera carga con un worker: no cumple p95 ni tasa sostenida; evidencia conservada en results/ y docs/RESULTADOS.md.
 - Optimización de clave JWT validada; comparación de uno y dos workers documentada. Se corrigió el script PM2/PowerShell y se preasignaron 300 VUs en k6 sin reducir tasa ni flexibilizar umbrales.
 - Ensayo con outbox activo y dos workers: 500 consultas/s durante 60 s, p95 de 25,67 ms, cero errores y cero iteraciones descartadas. Evidencia publicable en results/public/ y docs/RESULTADOS.md.
-- Implementada entrega durable según ADR-02; documentadas la cuarta tabla física, la entrega eventual y sus condiciones. Pendiente de la entrega general: preparar/revisar el PDF final.
+- Implementada entrega durable según ADR-02; documentadas la cuarta tabla física, la entrega eventual y sus condiciones. PDF A1–A4 de ocho páginas preparado para Equipo de RAT 2, con revisión visual de las páginas renderizadas.
 
 ## Pendientes para cerrar la entrega
 
-1. Renderizar el UML y armar/revisar visualmente el PDF con A1–A4, incluyendo ADR-02 y la justificación de la tabla técnica.
+1. Realizar la revisión del equipo sobre el PDF A1–A4 ya generado, que incluye UML vectorial, ADR-02, evidencia y justificación de la tabla técnica.
 2. Verificar instalación y arranque desde un clon limpio siguiendo solamente el README.
 3. Recorrer manualmente todos los formularios de administrador y cliente; la verificación de navegador realizada hasta ahora cubre login, catálogo y listados.
 4. Publicar los nuevos commits en GitHub cuando corresponda y, al cerrar los puntos anteriores, considerar una etiqueta de referencia para la próxima parte.
 
 No se requiere agregar funcionalidades para esos puntos. La retención automática de eventos entregados y una prueba de capacidad de escrituras/backlog son mejoras posteriores, distintas del requisito de carga de consultas ya verificado.
+
+## Revisión preventiva de la segunda parte
+
+Se revisaron Pub/Sub, CQRS, eventos y posible MongoDB sin implementar requisitos supuestos. No se identificaron bloqueos que justifiquen cambios de código hoy. docs/PREPARACION_PARTE2.md registra los puntos de extensión y los límites: los eventos de auditoría actuales no llevan estado para proyecciones completas y reemplazar PostgreSQL como fuente de escritura requiere preservar transacciones y control de solapamientos. Estas decisiones se tomarán con la nueva consigna.

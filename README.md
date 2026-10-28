@@ -116,6 +116,14 @@ WHERE delivered_at IS NULL
 ORDER BY created_at;
 ```
 
+## Informe A1–A4
+
+El documento de entrega está en [SmartParking - Parte 1 - Equipo de RAT 2](output/pdf/SmartParking_Parte1_Equipo_RAT2.pdf), con ocho páginas: componentes UML, contratos y seguridad, escenarios de calidad, decisión de outbox y revisión de consistencia con evidencia de pruebas.
+
+La fuente editable es `scripts/build-report.py` y la figura vectorial generada está en `docs/diagramas/componentes.svg`. Para regenerar el PDF se requiere Python con `reportlab` y `pypdf`, y las fuentes Segoe UI de Windows; ejecutar `python scripts/build-report.py` desde la raíz. Esto no agrega dependencias al servidor Node.js.
+
+La [revisión preventiva para la segunda parte](docs/PREPARACION_PARTE2.md) documenta los puntos de extensión para Pub/Sub, CQRS y MongoDB, sin incorporar funcionalidades especulativas.
+
 ## Detener
 
 ```powershell

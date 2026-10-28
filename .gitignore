@@ -6,6 +6,9 @@ dist/
 data/
 logs/
 tmp/
-output/
+output/*
+!output/pdf/
+output/pdf/*
+!output/pdf/SmartParking_Parte1_Equipo_RAT2.pdf
 results/*.json
 *.log
